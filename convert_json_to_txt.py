@@ -1,56 +1,68 @@
 import os
 import json
+from tqdm import tqdm
 
-input_dir = 'datasets/BTXRD/Annotations'
-output_dir = 'datasets/BTXRD/labels'
-
-os.makedirs(output_dir, exist_ok=True)
+# Cấu hình
+json_folder = "datasets/BTXRD/Annotations"
+output_folder = "datasets/BTXRD/labels"
+os.makedirs(output_folder, exist_ok=True)
 
 label_map = {
-    "benign": 0,
-    "malignant": 1,
-    "other mt": 2  # hoặc bạn có thể chọn chỉ dùng benign và malignant
+    "giant cell tumor": 0,
+    "multiple osteochondromas": 1,
+    "osteochondroma": 2,
+    "osteofibroma": 3,
+    "osteosarcoma": 4,
+    "other bt": 5,
+    "other mt": 6,
+    "simple bone cyst": 7,
+    "synovial osteochondroma": 8
 }
 
-for filename in os.listdir(input_dir):
-    if not filename.endswith('.json'):
+# Duyệt tất cả file JSON
+for filename in tqdm(os.listdir(json_folder)):
+    if not filename.endswith(".json"):
         continue
 
-    filepath = os.path.join(input_dir, filename)
-    with open(filepath, 'r') as f:
+    json_path = os.path.join(json_folder, filename)
+    with open(json_path, 'r') as f:
         data = json.load(f)
-
-    shapes = data.get("shapes", [])
-    if not shapes:
-        print(f"⚠️ Bỏ qua: {filename} không có shapes.")
-        continue
 
     image_width = data["imageWidth"]
     image_height = data["imageHeight"]
-
     label_lines = []
-    for shape in shapes:
-        label = shape["label"].lower().strip()
-        if label not in label_map:
-            continue  # bỏ qua label không xác định
 
-        cls_id = label_map[label]
-        if shape["shape_type"] == "rectangle":
-            (x1, y1), (x2, y2) = shape["points"]
-            cx = (x1 + x2) / 2 / image_width
-            cy = (y1 + y2) / 2 / image_height
-            w = abs(x2 - x1) / image_width
-            h = abs(y2 - y1) / image_height
-            label_lines.append(f"{cls_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
-        elif shape["shape_type"] == "polygon":
-            points = shape["points"]
-            norm_points = [(x / image_width, y / image_height) for x, y in points]
-            flat_coords = " ".join([f"{x:.6f} {y:.6f}" for x, y in norm_points])
-            label_lines.append(f"{cls_id} {flat_coords}")
+    for shape in data["shapes"]:
+        label = shape["label"]
+        class_id = label_map.get(label)
+        if class_id is None:
+            continue
 
-    if label_lines:
-        out_filename = os.path.splitext(filename)[0] + ".txt"
-        with open(os.path.join(output_dir, out_filename), 'w') as out_f:
-            out_f.write("\n".join(label_lines))
-    else:
-        print(f"⚠️ Bỏ qua: {filename} không có label hợp lệ.")
+        shape_type = shape.get("shape_type", "polygon")
+        points = shape["points"]
+
+        # Chuyển rectangle thành polygon
+        if shape_type == "rectangle" and len(points) == 2:
+            (x1, y1), (x2, y2) = points
+            points = [
+                [x1, y1],
+                [x2, y1],
+                [x2, y2],
+                [x1, y2]
+            ]
+
+        # Chuẩn hóa điểm
+        normalized_points = []
+        for x, y in points:
+            nx = x / image_width
+            ny = y / image_height
+            normalized_points.extend([nx, ny])
+
+        line = f"{class_id} " + " ".join(f"{p:.6f}" for p in normalized_points)
+        label_lines.append(line)
+
+    # Ghi file txt
+    txt_filename = filename.replace(".json", ".txt")
+    txt_path = os.path.join(output_folder, txt_filename)
+    with open(txt_path, "w") as f:
+        f.write("\n".join(label_lines))
