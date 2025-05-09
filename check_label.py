@@ -1,24 +1,23 @@
 import os
-import json
+from tqdm import tqdm
 
-annotations_dir = 'datasets/BTXRD/Annotations'
-unique_labels = set()
+# Cấu hình
+image_folder = "datasets/BTXRD/images"
+annotation_folder = "datasets/BTXRD/Annotations"
+label_folder = "datasets/BTXRD/labels"
+os.makedirs(label_folder, exist_ok=True)
 
-for file in os.listdir(annotations_dir):
-    if not file.endswith('.json'):
-        continue
+# Lấy danh sách ảnh
+all_images = sorted([f for f in os.listdir(image_folder) if f.endswith(('.jpg', '.jpeg', '.png'))])
 
-    json_path = os.path.join(annotations_dir, file)
-    with open(json_path, 'r') as f:
-        data = json.load(f)
+# Tạo danh sách annotation có nhãn
+annotated_images = set(f.replace('.json', '') for f in os.listdir(annotation_folder) if f.endswith('.json'))
 
-    shapes = data.get('shapes', [])
-    for shape in shapes:
-        label = shape.get('label', '').strip()
-        if label:
-            unique_labels.add(label)
+# Duyệt qua tất cả ảnh
+for img_file in tqdm(all_images):
+    img_name = os.path.splitext(img_file)[0]
+    label_path = os.path.join(label_folder, img_name + ".txt")
 
-# In ra tất cả các nhãn khác nhau
-print("Các nhãn (label) khác nhau trong tập dữ liệu:")
-for label in sorted(unique_labels):
-    print(f"- {label}")
+    # Nếu ảnh không có annotation → tạo file txt rỗng
+    if img_name not in annotated_images:
+        open(label_path, "w").close()  # Tạo file rỗng

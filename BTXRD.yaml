@@ -1,10 +1,19 @@
-path: datasets/BTXRD
-train: images/train
-val: images/val
+train:
+  images: "datasets/BTXRD/images/train"
+  labels: "datasets/BTXRD/labels/train"
 
-# test: images/test
-
+val:
+  images: "datasets/BTXRD/images/val"
+  labels: "datasets/BTXRD/labels/val"
+# Danh sách tên lớp - thứ tự phải đúng với ID trong label
 names:
-  0: normal
-  1: benign
-  2: malignant
+  0: giant cell tumor
+  1: multiple osteochondromas
+  2: osteochondroma
+  3: osteofibroma
+  4: osteosarcoma
+  5: other bt
+  6: other mt
+  7: simple bone cyst
+  8: synovial osteochondroma
+
