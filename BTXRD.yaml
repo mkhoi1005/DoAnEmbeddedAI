@@ -1,0 +1,10 @@
+path: datasets/BTXRD
+train: images/train
+val: images/val
+
+# test: images/test
+
+names:
+  0: normal
+  1: benign
+  2: malignant
