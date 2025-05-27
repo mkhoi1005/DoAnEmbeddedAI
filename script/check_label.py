@@ -6,9 +6,9 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 from tqdm import tqdm
 
 # Cấu hình
-image_folder = "datasets/BTXRD/images/all"
-annotation_folder = "datasets/BTXRD/Annotations"
-label_folder = "datasets/BTXRD/labels/all"
+image_folder = "../datasets/BTXRD/images/all"
+annotation_folder = "../datasets/BTXRD/Annotations"
+label_folder = "../datasets/BTXRD/labels/all"
 os.makedirs(label_folder, exist_ok=True)
 
 # Lấy danh sách ảnh

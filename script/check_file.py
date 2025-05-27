@@ -4,8 +4,8 @@ import sys
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-image_dir = "datasets/BTXRD/images/train"
-label_dir = "datasets/BTXRD/labels/train"
+image_dir = "../datasets/BTXRD/images/train"
+label_dir = "../datasets/BTXRD/labels/train"
 
 # Lấy danh sách tên file (không có đuôi mở rộng)
 image_files = {os.path.splitext(f)[0] for f in os.listdir(image_dir) if f.endswith((".jpeg", ".jpg", ".png"))}

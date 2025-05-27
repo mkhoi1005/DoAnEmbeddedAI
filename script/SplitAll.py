@@ -6,7 +6,7 @@ from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
 import pandas as pd
 
 # --- Cấu hình đường dẫn ---
-images_all_dir = '../datasets/BTXRD/images/all'
+images_all_dir = '../datasets/BTXRD/images/all1'
 annotations_dir = '../datasets/BTXRD/annotations'
 images_train_dir = '../datasets/BTXRD/images/train'
 images_val_dir = '../datasets/BTXRD/images/val'
