@@ -1,3 +1,5 @@
+# Đếm số lượng ảnh chứa mỗi lớp trong tập dữ liệu
+
 import os
 from collections import defaultdict
 

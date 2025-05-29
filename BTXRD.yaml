@@ -1,4 +1,4 @@
-path: datasets/BTXRD
+path: BTXRD
 train: images/train
 val: images/val
 names:

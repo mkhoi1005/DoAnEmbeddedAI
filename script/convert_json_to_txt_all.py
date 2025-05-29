@@ -1,74 +1,67 @@
 import os
 import json
 
-# Đường dẫn dữ liệu
-json_folder = "datasets/BTXRD/annotations"
-output_folder = "datasets/BTXRD/labels/all"
+# Thư mục đầu vào và đầu ra
+json_folder = r"D:\EmbededAI\datasets\BTXRD\Annotations"
+output_folder = r"D:\EmbededAI\datasets\BTXRD\labels\all"
+
+# Tạo thư mục output nếu chưa tồn tại
 os.makedirs(output_folder, exist_ok=True)
 
-# Nhãn theo class_names.txt
-class_names = [
-    "osteochondroma",
-    "synovial osteochondroma",
-    "osteofibroma",
-    "simple bone cyst",
-    "other bt",
-    "other mt",
-    "multiple osteochondromas",
-    "osteosarcoma",
-    "giant cell tumor"
-]
-label_map = {name.lower(): idx for idx, name in enumerate(class_names)}
+# Bảng ánh xạ tên lớp → class_id
+label2id = {
+    "osteochondroma": 0,
+    "synovial osteochondroma": 1,
+    "osteofibroma": 2,
+    "simple bone cyst": 3,
+    "other bt": 4,
+    "other mt": 5,
+    "multiple osteochondromas": 6,
+    "osteosarcoma": 7,
+    "giant cell tumor": 8,
+}
 
-# Hàm xử lý rectangle thành 4 điểm polygon
-def rectangle_to_polygon(p1, p2):
-    x1, y1 = p1
-    x2, y2 = p2
-    return [
-        [x1, y1],
-        [x2, y1],
-        [x2, y2],
-        [x1, y2]
-    ]
-
-# Xử lý từng JSON
+# Lặp qua từng file JSON
 for filename in os.listdir(json_folder):
     if not filename.endswith(".json"):
         continue
 
     json_path = os.path.join(json_folder, filename)
-    with open(json_path, "r") as f:
+    txt_path = os.path.join(output_folder, filename.replace(".json", ".txt"))
+
+    with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    w = data.get("imageWidth", 1)
-    h = data.get("imageHeight", 1)
+    image_w = data.get("imageWidth")
+    image_h = data.get("imageHeight")
 
-    yolo_lines = []
-    for shape in data.get("shapes", []):
-        label = shape["label"].lower().strip()
-        shape_type = shape.get("shape_type", "polygon")
-        if label not in label_map:
-            print(f"[!] Không có nhãn: {label} trong class_names.txt")
-            continue
-        class_id = label_map[label]
+    if not image_w or not image_h:
+        print(f"Bỏ qua {filename}: thiếu imageWidth/imageHeight")
+        continue
 
-        if shape_type == "rectangle":
-            points = rectangle_to_polygon(shape["points"][0], shape["points"][1])
-        elif shape_type == "polygon":
-            points = shape["points"]
-        else:
-            continue  # Bỏ qua loại shape không rõ
+    with open(txt_path, "w") as out:
+        for shape in data.get("shapes", []):
+            if shape.get("shape_type") != "polygon":
+                continue  # Bỏ qua bbox và các shape khác
 
-        # Chuẩn hóa
-        x_coords = [p[0] / w for p in points]
-        y_coords = [p[1] / h for p in points]
-        coords = [coord for xy in zip(x_coords, y_coords) for coord in xy]
+            label = shape.get("label", "").strip()
+            if label not in label2id:
+                print(f"[!] Nhãn '{label}' không có trong bảng label2id. Bỏ qua trong {filename}")
+                continue
 
-        line = f"{class_id} " + " ".join(f"{c:.6f}" for c in coords)
-        yolo_lines.append(line)
+            class_id = label2id[label]
+            points = shape.get("points", [])
 
-    # Lưu file .txt
-    txt_filename = filename.replace(".json", ".txt")
-    txt_path = os.path.join(output_folder, txt_filename)
-    with open(txt_path, "w") as out_f:
-        out_f.write("\n".join(yolo_lines))
+            if len(points) < 3:
+                continue  # polygon phải có ít nhất 3 điểm
+
+            line = [str(class_id)]
+            for x, y in points:
+                x_norm = x / image_w
+                y_norm = y / image_h
+                line.append(f"{x_norm:.6f}")
+                line.append(f"{y_norm:.6f}")
+
+            out.write(" ".join(line) + "\n")
+
+print("✅ Đã chuyển xong tất cả file JSON sang TXT (polygon-only, có class mapping).")
