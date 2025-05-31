@@ -1,0 +1,9 @@
+0: osteochondroma
+1: synovial osteochondroma 
+2: osteofibroma 
+3: simple bone cyst
+4: other bt 
+5: other mt
+6: multiple osteochondromas
+7: osteosarcoma 
+8: giant cell tumor
