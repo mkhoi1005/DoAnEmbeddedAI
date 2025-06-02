@@ -1,0 +1,7 @@
+task: segment
+imgsz: 640
+batch: 4
+epochs: 10
+data: BTXRD.yaml
+optimizer: SGD
+lr0: 0.01
