@@ -19,7 +19,7 @@ def main():
 
     model.train(
         data='BTXRD.yaml',
-        epochs=200,                 # tăng số epoch do mô hình nhỏ học chậm hơn
+        epochs=300,                 # tăng số epoch do mô hình nhỏ học chậm hơn
         imgsz=640,
         batch=16,
         optimizer='AdamW',
@@ -29,7 +29,7 @@ def main():
         cache=True,
         close_mosaic=30,           # mở rộng thời gian dùng mosaic
         dropout=0.3,               # giảm nhẹ dropout phù hợp mô hình nhỏ
-        freeze=0,                  # đóng băng ít layer hơn do model nhỏ
+        freeze=8,                  # đóng băng ít layer hơn do model nhỏ
         amp=True,
         cos_lr=True,
         **filtered
