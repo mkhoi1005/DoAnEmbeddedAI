@@ -15,7 +15,7 @@ def main():
     }
     filtered = {k: v for k, v in hyp_args.items() if k in valid_keys}
 
-    model = YOLO('best.pt')  # mô hình segmentation nhẹ
+    model = YOLO('yolov8n-seg.pt')  # mô hình segmentation nhẹ
 
     model.train(
         data='BTXRD.yaml',
