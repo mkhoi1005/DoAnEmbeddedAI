@@ -1,13 +1,12 @@
 import numpy as np
-import tflite_runtime.interpreter as tflite
-# ...và thay self.interpreter = tflite.Interpreter(model_path=model_path)
+import tensorflow as tf
 import cv2
 
 NUM_CLASSES = 9  # Số class theo class_names.txt
 
 class Model(object):
     def __init__(self, model_path):
-        self.interpreter = tflite.Interpreter(model_path=model_path)
+        self.interpreter = tf.lite.Interpreter(model_path=model_path)
         self.interpreter.allocate_tensors()
 
         self.input_details = self.interpreter.get_input_details()
@@ -18,7 +17,7 @@ class Model(object):
         self.floating_model = self.input_details[0]["dtype"] == np.float32
         self.input_height = self.input_details[0]["shape"][1]
         self.input_width = self.input_details[0]["shape"][2]
-        self.score_threshold = 0.3  # Có thể tăng lên 0.5 nếu còn nhiều mask rác
+        self.score_threshold = 0.0000001  # Có thể tăng lên 0.5 nếu còn nhiều mask rác
 
     def prepare(self):
         return None
@@ -62,6 +61,7 @@ class Model(object):
         polygons = []
         img_h, img_w = self.input_height, self.input_width
 
+        # ...existing code...
         for i in range(results.shape[0]):
             row = results[i]
             score = row[4]
@@ -69,7 +69,7 @@ class Model(object):
             class_id = int(np.argmax(class_scores))
             if score < self.score_threshold:
                 continue
-            x1, y1, x2, y2 = row[:4]
+            x1, y1, x2, y2 = row[:4]    
 
             # Nếu box nhỏ (0-1), scale lên ảnh
             if x2 <= 2 and y2 <= 2:
@@ -92,12 +92,12 @@ class Model(object):
 
             mask_full = np.zeros((img_h, img_w), dtype=np.uint8)
             x1i, y1i = max(int(x1), 0), max(int(y1), 0)
-            x2i, y2i = min(x1i + box_w, img_w), min(y1i + box_h, img_h)
+            x2i, y2i = min(x1i + box_w, img_w), min(y1i + box_w, img_h)
             h_mask, w_mask = y2i - y1i, x2i - x1i
             # Chỉ gán khi vùng hợp lệ và mask_bin đủ lớn
             if h_mask > 0 and w_mask > 0 and \
-               mask_bin.shape[0] >= h_mask and mask_bin.shape[1] >= w_mask and \
-               y2i > y1i and x2i > x1i:
+            mask_bin.shape[0] >= h_mask and mask_bin.shape[1] >= w_mask and \
+            y2i > y1i and x2i > x1i:
                 mask_full[y1i:y2i, x1i:x2i] = mask_bin[:h_mask, :w_mask]
 
             contours, _ = cv2.findContours(mask_full, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -107,7 +107,8 @@ class Model(object):
                     continue
                 polygon = [int(class_id)]
                 for point in contour:
-                    polygon.extend([int(point[0]), int(point[1])])
+                    polygon.extend([round(float(point[0]), 6), round(float(point[1]), 6)])
                 polygons.append(polygon)
 
         return polygons
+        # ...existing code...
