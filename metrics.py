@@ -887,11 +887,18 @@ def eval_mask_results(results, nc, input_size):
     for pred_polygons, gt in results:
 
         labels, segments = gt
+
+        labels = np.array(labels, dtype=np.float32)
+        segments = [np.array(seg, dtype=np.float32) for seg in segments]
+
+        print("Pred class_ids:", [p[0] for p in pred_polygons])
+        print("GT class_ids:", labels[:, 0] if len(labels) else [])
+
         nl, npr = labels.shape[0], len(pred_polygons)
         labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w=input_size, h=input_size)
         segments = [xyn2xy(segment,w=input_size, h=input_size) for segment in segments]
         gt_masks = polygons2masks((input_size, input_size), segments, color=1)
-        correct = np.zeros((npr, niou), dtype=np.bool) 
+        correct = np.zeros((npr, niou), dtype=np.bool_) 
 
         if npr == 0:
             if nl:
