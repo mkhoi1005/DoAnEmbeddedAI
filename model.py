@@ -1,50 +1,74 @@
 import numpy as np
-import tflite_micro_runtime.interpreter as tflite
-
-# from nms import non_max_suppression_yolov8
+import tflite_runtime.interpreter as tflite
 
 class Model(object):
     def __init__(self, model_path):
-        #super.__init__()
         self.interpreter = tflite.Interpreter(model_path=model_path)
         self.interpreter.allocate_tensors()
-
-        self.BOX_COORD_NUM = 4
-
         self.input_details = self.interpreter.get_input_details()
         self.output_details = self.interpreter.get_output_details()
-        print(self.input_details)
-
-        # check the type of the input tensor
-        self.floating_model = self.input_details[0]["dtype"] == np.float32
-
-        # NxHxWxC, H:1, W:2
         self.input_height = self.input_details[0]["shape"][1]
         self.input_width = self.input_details[0]["shape"][2]
+        self.score_threshold = 0.3  # hoặc 0.1 tuỳ yêu cầu
 
-        self.max_box_count = self.output_details[0]["shape"][2]
-
-        self.class_count = self.output_details[0]["shape"][1] - self.BOX_COORD_NUM
-        self.input_mean = 0.0
-        self.input_std = 255.0
-        self.keypoint_count = 0
-        self.score_threshold = 0.6
+        # Tự động lấy số class và số điểm polygon từ output shape
+        output_shape = self.output_details[0]["shape"]  # (1, 45, 2100)
+        feature_dim = output_shape[1]  # 45
+        # YOLOv8-seg: [x, y, w, h, obj, cls1, ..., clsn, mask1, ..., maskN, poly1, ..., polyM]
+        # Đoạn đầu: 4 bbox + 1 obj + n class + n_mask + n_polygon
+        # Để xác định số class và số điểm polygon:
+        # Giả sử số mask coeffs = 32 (YOLOv8 mặc định), số polygon points = (feature_dim - 4 - 1 - n_class - 32) // 2
+        # Thử các giá trị hợp lý cho n_class (ví dụ từ 1 đến 100)
+        found = False
+        for n_class in range(1, 100):
+            n_mask = 32  # YOLOv8 mặc định
+            remain = feature_dim - 4 - 1 - n_class - n_mask
+            if remain >= 6 and remain % 2 == 0:
+                self.class_count = n_class
+                self.polygon_points = remain // 2
+                found = True
+                break
+        if not found:
+            raise RuntimeError("Không thể tự động xác định số class và số điểm polygon từ output shape!")
 
     def prepare(self):
-        return None
+        pass
 
     def predict(self, image):
-        input_data = np.expand_dims(image, axis=0)
+        # Chuyển sang numpy array nếu là PIL.Image
+        if hasattr(image, "convert"):
+            image = np.array(image.convert("RGB"))
+        if image.shape[0] == 3 and image.shape[-1] != 3:
+            image = np.transpose(image, (1, 2, 0))
+        input_data = np.expand_dims(image.astype(np.float32), axis=0)
+        input_data = input_data / 255.0
 
-        if self.floating_model:
-            input_data = (np.float32(input_data) - self.input_mean) / self.input_std
-
-        self.interpreter.set_tensor(self.input_details[0]["index"], input_data)
-
+        self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
         self.interpreter.invoke()
+        output_data = self.interpreter.get_tensor(self.output_details[0]['index'])  # (1, feature_dim, N)
 
-        output_data = self.interpreter.get_tensor(self.output_details[0]["index"])
-        results = np.squeeze(output_data).transpose()
-
+        preds = output_data[0]  # (feature_dim, N)
+        preds = preds.transpose(1, 0)  # (N, feature_dim)
+        results = []
+        for det in preds:
+            obj_score = det[4]
+            class_scores = det[5:5+self.class_count]
+            class_id = int(np.argmax(class_scores))
+            score = obj_score * class_scores[class_id]
+            if score < self.score_threshold:
+                continue
+            x, y, w, h = det[0], det[1], det[2], det[3]
+            x1 = (x - w/2) * self.input_width
+            y1 = (y - h/2) * self.input_height
+            x2 = (x + w/2) * self.input_width
+            y2 = (y + h/2) * self.input_height
+            polygon = det[5+self.class_count+32:5+self.class_count+32+self.polygon_points*2]
+            polygon_pixel = []
+            for i, v in enumerate(polygon):
+                if abs(v) > 1.5:
+                    polygon_pixel.append(float(v))
+                else:
+                    polygon_pixel.append(float(v) * (self.input_width if i % 2 == 0 else self.input_height))
+            instance = [class_id, float(score), x1, y1, x2, y2] + polygon_pixel
+            results.append(instance)
         return results
-

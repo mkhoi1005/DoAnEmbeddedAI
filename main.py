@@ -4,6 +4,8 @@ from model import *
 from PIL import Image
 import time
 import numpy as np
+if not hasattr(np, 'bool'):
+    np.bool = bool
 
 if __name__ == "__main__":
     #ONLY CHANGE 5 LINES
@@ -27,6 +29,11 @@ if __name__ == "__main__":
         print(fi)
         img = Image.open(fi).resize((input_size, input_size))
         labels = targets[os.path.basename(fi).rsplit(".", 1)[0]]
+        # Ép kiểu labels thành numpy array nếu cần
+        if isinstance(labels, tuple):
+            labels = (np.array(labels[0]), labels[1])
+        else:
+            labels = np.array(labels)
 
         start_time = time.time()
         preds = model.predict(img)
@@ -41,14 +48,3 @@ if __name__ == "__main__":
     mp, mr, map50, map, f1 = eval_mask_results(results, nc, input_size)
     score = 2*normFPS*f1/(normFPS + f1)
     print("Score: {:.3f}".format(score))
-    
-
-
-
-
-
-
-
-
-
-
