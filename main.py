@@ -7,7 +7,7 @@ import numpy as np
 
 if __name__ == "__main__":
     #ONLY CHANGE 5 LINES
-    data_path = 'BTXRD/images' #path to dataset
+    data_path = './BTXRD/images' #path to dataset
     nc = 9 #number of class
     path_to_model = "./best_float32.tflite" #path to model
     model = Model(model_path=path_to_model)
@@ -33,16 +33,7 @@ if __name__ == "__main__":
         stop_time = time.time()
         run_time = stop_time - start_time
         total_time += run_time
-
-        # In nhãn thực tế và nhãn dự đoán
-        print("Ground truth:", labels)
-        print("Prediction:", preds)
-
-        # Sửa dòng này:
-        if isinstance(preds, tuple):
-            results.append((preds[0], labels))  # chỉ lấy polygons
-        else:
-            results.append((preds, labels))
+        results.append((preds, labels))
 
     FPS = total_file/total_time
     print("Average FPS: {:.3f}".format(FPS))

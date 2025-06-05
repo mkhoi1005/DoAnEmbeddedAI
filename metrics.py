@@ -6,7 +6,7 @@
 # import warnings
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import numpy as np
 import threading
 import os
@@ -213,7 +213,7 @@ def get_target_from_data(data_path, dataset_name, size):
         return lb_dict
 
     elif dataset_name == "svrdd": #YOLO format with custom folder
-        paths = [data_path + f'{os.sep}' + line.rstrip().replace("\\","/") for line in open(data_path + f'{os.sep}test.txt')]
+        paths = [data_path + f'{os.sep}' + line.rstrip().replace("\\",f'{os.sep}') for line in open(data_path + f'{os.sep}test.txt')]
         lb_paths = img2label_paths(paths)
         lb_dict = dict()
         for lb_file in lb_paths:
@@ -513,7 +513,7 @@ def get_image_paths(data_path, dataset_name):
         return paths
 
     elif dataset_name == "svrdd": #YOLO format with custom folder
-        paths = [data_path + f'{os.sep}' + line.rstrip().replace("\\","/") for line in open(data_path + f'{os.sep}test.txt')]
+        paths = [data_path + f'{os.sep}' + line.rstrip().replace("\\",f'{os.sep}') for line in open(data_path + f'{os.sep}test.txt')]
         return paths
 
     elif dataset_name == "idd_fgvd": #VOC format
@@ -679,9 +679,9 @@ def metrics_np(y_true, y_pred, metric_name, metric_type='standard', drop_last = 
     
     # intersection and union shapes are batch_size * n_classes (values = area in pixels)
     axes = (1,2) # W,H axes of each image
-    intersection = np.sum(np.abs(y_pred * y_true), axis=axes) # or, np.logical_and(y_pred, y_true) for one-hot
+    intersection = np.sum(np.abs(y_pred * y_true), axis=axes) # or, np.logical_and(y_pred, y_true) #for one-hot # 
     mask_sum = np.sum(np.abs(y_true), axis=axes) + np.sum(np.abs(y_pred), axis=axes)
-    union = mask_sum  - intersection # or, np.logical_or(y_pred, y_true) for one-hot
+    union = mask_sum  - intersection # or, np.logical_or(y_pred, y_true) # for one-hot # 
     
     if verbose:
         print('intersection (pred*true), intersection (pred&true), union (pred+true-inters), union (pred|true)')
@@ -887,18 +887,11 @@ def eval_mask_results(results, nc, input_size):
     for pred_polygons, gt in results:
 
         labels, segments = gt
-
-        labels = np.array(labels, dtype=np.float32)
-        segments = [np.array(seg, dtype=np.float32) for seg in segments]
-
-        print("Pred class_ids:", [p[0] for p in pred_polygons])
-        print("GT class_ids:", labels[:, 0] if len(labels) else [])
-
         nl, npr = labels.shape[0], len(pred_polygons)
         labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w=input_size, h=input_size)
         segments = [xyn2xy(segment,w=input_size, h=input_size) for segment in segments]
         gt_masks = polygons2masks((input_size, input_size), segments, color=1)
-        correct = np.zeros((npr, niou), dtype=np.bool_) 
+        correct = np.zeros((npr, niou), dtype=np.bool) 
 
         if npr == 0:
             if nl:
@@ -909,16 +902,17 @@ def eval_mask_results(results, nc, input_size):
         #pred must be a array of shape (N, 6) where each row corresponds to a detection with format [x1, y1, x2, y2, conf, class]
         pred = []
         for polygon in pred_polygons:
-            poly = np.array(polygon[1:]).reshape(-1, 2)
+            poly = np.array(polygon[2:]).reshape(-1, 2)
             label = polygon[0]
+            score = polygon[1]
             x, y = poly.T
-            pred.append([x.min(), y.min(), x.max(), y.max(), 1.0, label])
+            pred.append([x.min(), y.min(), x.max(), y.max(), score, label])
 
         pred = np.array(pred)
 
         pred_masks = []
         for polygon in pred_polygons:
-            pred_masks.append(np.array(polygon[1:]).reshape(-1, 2))
+            pred_masks.append(np.array(polygon[2:]).reshape(-1, 2))
 
         pred_masks = polygons2masks((input_size, input_size), pred_masks, color=1)
 
@@ -953,26 +947,49 @@ def eval_mask_results(results, nc, input_size):
     print(pf % ("all", nt.sum(), mp, mr, map50, map, f1))
     return mp, mr, map50, map, f1
 
+def convert_semantic_mask(mask, nc):
+    if len(mask.shape) == 2 or (len(mask.shape) == 3 and mask.shape[-1] == 1):
+        if nc == 3:
+            mask = np.stack([mask==0, mask==1, mask==2], axis=-1).astype(np.float32)
+        if nc == 8:
+            mask = np.stack([mask==0, mask==1, mask==2, mask==3, mask==4, mask==5, mask==6, mask==7], axis=-1).astype(np.float32)
+        if nc == 11:
+            mask = np.stack([mask==0, mask==1, mask==2, mask==3, mask==4, mask==5, mask==6, mask==7, mask==8, mask==9, mask==10], axis=-1).astype(np.float32)
+
+    mask = np.squeeze(mask)
+
+    return mask
+
 def eval_semantic_results(results, nc):
 
     y_pred = []
     y_true = []
 
     for pred, labels in results:
+        pred = convert_semantic_mask(pred, nc)
         y_pred.append(pred)
         y_true.append(labels)
 
     y_pred = np.array(y_pred)
     y_true = np.array(y_true)
 
-    if y_pred.shape != y_true.shape:
-        y_pred = y_pred.transpose(0, 2, 3, 1)
+    # if y_pred.shape != y_true.shape:
+    #     y_pred = y_pred.transpose(0, 2, 3, 1)
 
     if y_pred.shape[3] != nc:
         print('Wrong class count!')
-        return None
+        return 0.0
 
     return metrics_np(y_true, y_pred, metric_name='dice')
+
+def new_dice(mask1, mask2):
+    intersect = np.sum(mask1*mask2)
+    fsum = np.sum(mask1)
+    ssum = np.sum(mask2)
+    dice = (2 * intersect ) / (fsum + ssum)
+    dice = np.mean(dice)
+    dice = round(dice, 3)
+    return dice
 
 def xyn2xy(x, w=640, h=640, padw=0, padh=0):
     """Convert normalized segments into pixel segments, shape (n,2)."""
