@@ -26,21 +26,27 @@ if __name__ == "__main__":
     targets = get_target_from_data(data_path, dataset_name, input_size)
 
     for fi in image_paths:
-        print(fi)
-        img = Image.open(fi).resize((input_size, input_size))
-        labels = targets[os.path.basename(fi).rsplit(".", 1)[0]]
-        # Ép kiểu labels thành numpy array nếu cần
+        img = Image.open(fi).convert("RGB").resize((input_size, input_size))
+        img_np = np.array(img)
+        
+        label_key = os.path.basename(fi).rsplit(".", 1)[0]
+        labels = targets.get(label_key, None)
+        if labels is None:
+            continue  # Bỏ qua ảnh không có label
+
+        # Đảm bảo đúng format (labels, segments)
         if isinstance(labels, tuple):
-            labels = (np.array(labels[0]), labels[1])
+            labels_tuple = (np.array(labels[0]), labels[1])
         else:
-            labels = np.array(labels)
+            labels_tuple = (np.array(labels), [])
 
         start_time = time.time()
         preds = model.predict(img)
         stop_time = time.time()
         run_time = stop_time - start_time
         total_time += run_time
-        results.append((preds, labels))
+
+        results.append((preds, labels_tuple))
 
     FPS = total_file/total_time
     print("Average FPS: {:.3f}".format(FPS))
