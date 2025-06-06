@@ -296,6 +296,8 @@ def get_target_from_data(data_path, dataset_name, size):
                 box = [cls] + box.tolist()
                 if box not in bboxes:
                     bboxes.append(box)
+                    
+            bboxes = np.array(bboxes, dtype=np.float32)
 
             lb_dict[img["file_name"].rsplit(".",1)[0]] = bboxes
 
@@ -403,6 +405,8 @@ def get_target_from_data(data_path, dataset_name, size):
                 bboxes.append(box)
                 #if s not in segments:
                 segments.append(s)
+            
+            bboxes = np.array(bboxes, dtype=np.float32)
 
             lb_dict[img["file_name"].rsplit(".",1)[0]] = (bboxes, segments)
 
@@ -1156,6 +1160,8 @@ def get_label_json(lb_file, class_dict):
             label = np.concatenate((np.array([cls], dtype=np.float32), segments2boxes(segment)[0]))
             lb.append(label)
             segments.append(segment)
+
+    lb = np.array(lb, dtype=np.float32)
 
     return lb, segments
 

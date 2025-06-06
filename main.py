@@ -4,13 +4,11 @@ from model import *
 from PIL import Image
 import time
 import numpy as np
-if not hasattr(np, 'bool'):
-    np.bool = bool
 
 if __name__ == "__main__":
     #ONLY CHANGE 5 LINES
     data_path = './BTXRD/images' #path to dataset
-    nc = 9 #number of class
+    nc = 23 #number of class
     path_to_model = "./best_float32.tflite" #path to model
     model = Model(model_path=path_to_model)
     dataset_name = "btxrd" #must be one of these names:  "btxrd", "rip current", "trashcan"
@@ -26,27 +24,16 @@ if __name__ == "__main__":
     targets = get_target_from_data(data_path, dataset_name, input_size)
 
     for fi in image_paths:
-        img = Image.open(fi).convert("RGB").resize((input_size, input_size))
-        img_np = np.array(img)
-        
-        label_key = os.path.basename(fi).rsplit(".", 1)[0]
-        labels = targets.get(label_key, None)
-        if labels is None:
-            continue  # Bỏ qua ảnh không có label
-
-        # Đảm bảo đúng format (labels, segments)
-        if isinstance(labels, tuple):
-            labels_tuple = (np.array(labels[0]), labels[1])
-        else:
-            labels_tuple = (np.array(labels), [])
+        print(fi)
+        img = Image.open(fi).resize((input_size, input_size))
+        labels = targets[os.path.basename(fi).rsplit(".", 1)[0]]
 
         start_time = time.time()
         preds = model.predict(img)
         stop_time = time.time()
         run_time = stop_time - start_time
         total_time += run_time
-
-        results.append((preds, labels_tuple))
+        results.append((preds, labels))
 
     FPS = total_file/total_time
     print("Average FPS: {:.3f}".format(FPS))
@@ -54,3 +41,14 @@ if __name__ == "__main__":
     mp, mr, map50, map, f1 = eval_mask_results(results, nc, input_size)
     score = 2*normFPS*f1/(normFPS + f1)
     print("Score: {:.3f}".format(score))
+    
+
+
+
+
+
+
+
+
+
+
