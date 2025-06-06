@@ -4,11 +4,13 @@ from model import *
 from PIL import Image
 import time
 import numpy as np
-
+if not hasattr(np, 'bool'):
+    np.bool = bool
+    
 if __name__ == "__main__":
     #ONLY CHANGE 5 LINES
     data_path = './BTXRD/images' #path to dataset
-    nc = 23 #number of class
+    nc = 9 #number of class
     path_to_model = "./best_float32.tflite" #path to model
     model = Model(model_path=path_to_model)
     dataset_name = "btxrd" #must be one of these names:  "btxrd", "rip current", "trashcan"
