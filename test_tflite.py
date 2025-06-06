@@ -17,7 +17,7 @@ with open(class_path, encoding="utf-8") as f:
             idx, name = line.strip().split(':', 1)
             class_map[name.strip()] = int(idx.strip())
 
-# 2. Đọc annotation và chuẩn hóa về 640x640, lấy cả label và index
+# 2. Đọc annotation và chuẩn hóa về 320x320, lấy cả label và index
 with open(anno_path, encoding="utf-8") as f:
     anno = json.load(f)
 img_h, img_w = anno["imageHeight"], anno["imageWidth"]
@@ -26,9 +26,9 @@ for shape in anno["shapes"]:
     if shape["shape_type"] == "polygon":
         poly = []
         for x, y in shape["points"]:
-            x640 = x * 640 / img_w
-            y640 = y * 640 / img_h
-            poly.append([x640, y640])
+            x320 = x * 320 / img_w
+            y320 = y * 320 / img_h
+            poly.append([x320, y320])
         label = shape.get("label", "").strip()
         class_index = class_map.get(label, -1)
         anno_instances.append({
@@ -76,7 +76,7 @@ def procrustes_align_polygon(predict_poly, anno_poly):
     R = np.dot(U, Vt)
     pts_pred_rotated = np.dot(pts_pred_scaled, R.T)
     pts_pred_final = pts_pred_rotated * norm_anno + c_anno
-    pts_pred_final = np.clip(pts_pred_final, 0, 639)
+    pts_pred_final = np.clip(pts_pred_final, 0, 319)
     return pts_pred_final.flatten().tolist()
 
 def ensure_same_direction(predict_poly, anno_poly):
@@ -108,12 +108,6 @@ def optimal_reorder_polygon_start(predict_poly, anno_poly):
             best_pts = pts_shifted
     return best_pts.flatten().tolist()
 
-def scale_polygon(poly, from_size, to_size):
-    scale = to_size / from_size
-    pts = np.array(poly, dtype=np.float32).reshape(-1, 2)
-    pts_scaled = pts * scale
-    return pts_scaled.astype(np.int32).reshape(-1, 1, 2)
-
 # 3. Load model và ảnh
 interpreter = tflite.Interpreter(model_path=model_path)
 interpreter.allocate_tensors()
@@ -121,7 +115,7 @@ input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
 img = cv2.imread(image_path)
-img_resized = cv2.resize(img, (640, 640))
+img_resized = cv2.resize(img, (320, 320))
 input_data = np.expand_dims(img_resized, axis=0).astype(np.float32)
 input_data = input_data / 255.0
 
@@ -136,7 +130,13 @@ np.set_printoptions(precision=4, suppress=True, linewidth=200)
 print(output_data)
 
 # 5. Lấy mask từ output segmentation (giả sử foreground là kênh cuối)
-mask = output_data[0, :, :, -1]  # lấy kênh cuối
+if output_data.ndim == 4:
+    mask = output_data[0, :, :, -1]
+elif output_data.ndim == 3:
+    mask = output_data[:, :, -1]
+else:
+    raise RuntimeError("Không xác định được shape output_data!")
+
 mask = (mask > 0).astype(np.uint8)  # nhị phân hóa
 
 # 6. Tìm contour lớn nhất và chuẩn hóa polygon predict
@@ -149,12 +149,9 @@ if len(contours) > 0:
         cnt = cnt[np.newaxis, :]
     # Nội suy polygon predict về cùng số điểm với annotation
     anno_poly = anno_instances[0]["polygon"].flatten().tolist()
-    # Chú ý: contour lấy từ mask 160x160, cần scale lên 640x640 để so với annotation
     polygon_resampled = resample_polygon(cnt, len(anno_poly)//2)
-    polygon_resampled_scaled = scale_polygon(polygon_resampled, 160, 640)
-    # Đưa về dạng list để align
-    polygon_resampled_scaled_flat = polygon_resampled_scaled.reshape(-1, 2).flatten().tolist()
-    polygon_aligned = procrustes_align_polygon(polygon_resampled_scaled_flat, anno_poly)
+    # Không cần scale vì mask và annotation đều ở 320x320
+    polygon_aligned = procrustes_align_polygon(polygon_resampled, anno_poly)
     polygon_aligned = ensure_same_direction(polygon_aligned, anno_poly)
     polygon_aligned = optimal_reorder_polygon_start(polygon_aligned, anno_poly)
     print("\nBest predict instance (chuẩn hóa):")
@@ -172,17 +169,24 @@ for i, ins in enumerate(anno_instances):
     print(f"\nAnnotation instance {i}:")
     print([ins["class_index"]] + poly_flat)
 
-# 8. Vẽ polygon predict (đỏ) và annotation (xanh lá) lên ảnh
+# 8. Vẽ mask predict (đỏ trong suốt) và annotation (xanh lá) lên ảnh
 img_vis = img_resized.copy()
 # Vẽ annotation (màu xanh lá)
 for ins in anno_instances:
     pts = ins["polygon"].astype(np.int32).reshape(-1, 1, 2)
     cv2.polylines(img_vis, [pts], isClosed=True, color=(0, 255, 0), thickness=2)
-# Vẽ polygon predict (màu đỏ)
+# Vẽ mask segment predict (đỏ trong suốt)
+mask_vis = (mask * 255).astype(np.uint8)
+mask_vis = cv2.resize(mask_vis, (img_vis.shape[1], img_vis.shape[0]), interpolation=cv2.INTER_NEAREST)
+color_mask = np.zeros_like(img_vis)
+color_mask[:, :, 0] = mask_vis  # tô kênh đỏ
+alpha = 0.4
+img_vis = cv2.addWeighted(color_mask, alpha, img_vis, 1 - alpha, 0)
+# Vẽ polygon predict (đường viền đỏ)
 if polygon_aligned is not None:
     pts_pred = np.array(polygon_aligned, dtype=np.int32).reshape(-1, 1, 2)
     cv2.polylines(img_vis, [pts_pred], isClosed=True, color=(0, 0, 255), thickness=2)
 # Hiển thị hoặc lưu ảnh
-cv2.imshow("Predict (red) vs Annotation (green)", img_vis)
+cv2.imshow("Predict mask (red) vs Annotation (green)", img_vis)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
