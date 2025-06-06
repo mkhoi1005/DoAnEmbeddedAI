@@ -4,7 +4,7 @@ import tensorflow.lite as tflite
 import json
 
 # Đường dẫn model, ảnh, annotation, class
-model_path = "best_float32.tflite"
+model_path = "calibrate.tflite"
 image_path = "BTXRD/images/val/IMG000071.jpeg"
 anno_path = "BTXRD/images/annotations/IMG000071.json"
 class_path = "BTXRD/images/class_names.txt"
@@ -17,7 +17,7 @@ with open(class_path, encoding="utf-8") as f:
             idx, name = line.strip().split(':', 1)
             class_map[name.strip()] = int(idx.strip())
 
-# 2. Đọc annotation và chuẩn hóa về 320x320, lấy cả label và index
+# 2. Đọc annotation và chuẩn hóa về 640x640, lấy cả label và index
 with open(anno_path, encoding="utf-8") as f:
     anno = json.load(f)
 img_h, img_w = anno["imageHeight"], anno["imageWidth"]
@@ -26,9 +26,9 @@ for shape in anno["shapes"]:
     if shape["shape_type"] == "polygon":
         poly = []
         for x, y in shape["points"]:
-            x320 = x * 320 / img_w
-            y320 = y * 320 / img_h
-            poly.append([x320, y320])
+            x640 = x * 640 / img_w
+            y640 = y * 640 / img_h
+            poly.append([x640, y640])
         label = shape.get("label", "").strip()
         class_index = class_map.get(label, -1)
         anno_instances.append({
@@ -37,6 +37,83 @@ for shape in anno["shapes"]:
             "polygon": np.array(poly, dtype=np.float32)
         })
 
+def resample_polygon(poly, num_points):
+    pts = np.array(poly, dtype=np.float32).reshape(-1, 2)
+    if len(pts) == num_points:
+        return pts.flatten().tolist()
+    dists = np.sqrt(np.sum(np.diff(np.vstack([pts, pts[0]]), axis=0)**2, axis=1))
+    total = np.sum(dists)
+    if total == 0:
+        return np.tile(pts[0], (num_points, 1)).flatten().tolist()
+    step = total / num_points
+    new_pts = [pts[0]]
+    acc = 0
+    i = 0
+    for _ in range(1, num_points):
+        acc += step
+        while acc > dists[i]:
+            acc -= dists[i]
+            i += 1
+            if i >= len(pts):
+                i = 0
+        ratio = acc / dists[i]
+        new_pt = pts[i] + ratio * (pts[(i+1)%len(pts)] - pts[i])
+        new_pts.append(new_pt)
+    return np.array(new_pts, dtype=np.float32).flatten().tolist()
+
+def procrustes_align_polygon(predict_poly, anno_poly):
+    pts_pred = np.array(predict_poly, dtype=np.float32).reshape(-1, 2)
+    pts_anno = np.array(anno_poly, dtype=np.float32).reshape(-1, 2)
+    c_pred = np.mean(pts_pred, axis=0)
+    c_anno = np.mean(pts_anno, axis=0)
+    pts_pred_centered = pts_pred - c_pred
+    pts_anno_centered = pts_anno - c_anno
+    norm_pred = np.sqrt(np.sum(pts_pred_centered**2))
+    norm_anno = np.sqrt(np.sum(pts_anno_centered**2))
+    pts_pred_scaled = pts_pred_centered / (norm_pred + 1e-8)
+    pts_anno_scaled = pts_anno_centered / (norm_anno + 1e-8)
+    U, _, Vt = np.linalg.svd(np.dot(pts_anno_scaled.T, pts_pred_scaled))
+    R = np.dot(U, Vt)
+    pts_pred_rotated = np.dot(pts_pred_scaled, R.T)
+    pts_pred_final = pts_pred_rotated * norm_anno + c_anno
+    pts_pred_final = np.clip(pts_pred_final, 0, 639)
+    return pts_pred_final.flatten().tolist()
+
+def ensure_same_direction(predict_poly, anno_poly):
+    def polygon_area(pts):
+        x = pts[:,0]
+        y = pts[:,1]
+        return 0.5 * np.sum(x[:-1]*y[1:] - x[1:]*y[:-1])
+    pts_pred = np.array(predict_poly, dtype=np.float32).reshape(-1, 2)
+    pts_anno = np.array(anno_poly, dtype=np.float32).reshape(-1, 2)
+    pts_pred_closed = np.vstack([pts_pred, pts_pred[0]])
+    pts_anno_closed = np.vstack([pts_anno, pts_anno[0]])
+    area_pred = polygon_area(pts_pred_closed)
+    area_anno = polygon_area(pts_anno_closed)
+    if np.sign(area_pred) != np.sign(area_anno):
+        pts_pred = pts_pred[::-1]
+    return pts_pred.flatten().tolist()
+
+def optimal_reorder_polygon_start(predict_poly, anno_poly):
+    pts_pred = np.array(predict_poly, dtype=np.float32).reshape(-1, 2)
+    pts_anno = np.array(anno_poly, dtype=np.float32).reshape(-1, 2)
+    n = len(pts_pred)
+    min_sum = None
+    best_pts = pts_pred
+    for shift in range(n):
+        pts_shifted = np.roll(pts_pred, -shift, axis=0)
+        dist_sum = np.sum(np.linalg.norm(pts_shifted - pts_anno, axis=1))
+        if (min_sum is None) or (dist_sum < min_sum):
+            min_sum = dist_sum
+            best_pts = pts_shifted
+    return best_pts.flatten().tolist()
+
+def scale_polygon(poly, from_size, to_size):
+    scale = to_size / from_size
+    pts = np.array(poly, dtype=np.float32).reshape(-1, 2)
+    pts_scaled = pts * scale
+    return pts_scaled.astype(np.int32).reshape(-1, 1, 2)
+
 # 3. Load model và ảnh
 interpreter = tflite.Interpreter(model_path=model_path)
 interpreter.allocate_tensors()
@@ -44,61 +121,68 @@ input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
 img = cv2.imread(image_path)
-img_resized = cv2.resize(img, (320, 320))
-img_show = img_resized.copy()
+img_resized = cv2.resize(img, (640, 640))
 input_data = np.expand_dims(img_resized, axis=0).astype(np.float32)
-input_data = (input_data - 0.0) / 255.0
+input_data = input_data / 255.0
 
-# 4. Chạy model
+# 4. Chạy model và lấy output thô
 interpreter.set_tensor(input_details[0]['index'], input_data)
 interpreter.invoke()
 output_data = interpreter.get_tensor(output_details[0]['index'])
 
-feature_dim = output_details[0]['shape'][2]
-class_count = len(class_map)
-polygon_points = (feature_dim - 4 - class_count) // 2
+print("=== Output thô của TFLite ===")
+print("Shape:", output_data.shape)
+np.set_printoptions(precision=4, suppress=True, linewidth=200)
+print(output_data)
 
-# 5. In kết quả predict theo mẫu yêu cầu và vẽ polygon predict (xanh lá)
-for idx, row in enumerate(output_data[0]):
-    score = np.max(row[4:4+class_count])
-    class_index = int(np.argmax(row[4:4+class_count]))
-    if score < 0.1:
-        continue
-    x1, y1, x2, y2 = row[0], row[1], row[2], row[3]
-    polygon = row[4+class_count:]
-    if len(polygon) % 2 != 0:
-        polygon = polygon[:-1]
-    if len(polygon) != polygon_points * 2:
-        print(f"Row {idx}: Polygon length không đúng ({len(polygon)})")
-        continue
-    polygon_pixel = []
-    for i, v in enumerate(polygon):
-        if i % 2 == 0:
-            polygon_pixel.append(float(v) * 320)
-        else:
-            polygon_pixel.append(float(v) * 320)
-    arr = [class_index, score, x1, y1, x2, y2] + polygon_pixel
-    print(f"Predict instance {idx}:")
-    print(arr)
-    # Vẽ polygon predict (xanh lá)
-    pts = np.array(polygon_pixel, dtype=np.int32).reshape(-1, 2)
-    cv2.polylines(img_show, [pts], isClosed=True, color=(0,255,0), thickness=2)
+# 5. Lấy mask từ output segmentation (giả sử foreground là kênh cuối)
+mask = output_data[0, :, :, -1]  # lấy kênh cuối
+mask = (mask > 0).astype(np.uint8)  # nhị phân hóa
 
-# 6. In annotation đã chuẩn hóa (có class_index) và vẽ polygon annotation (xanh dương)
+# 6. Tìm contour lớn nhất và chuẩn hóa polygon predict
+contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+polygon_aligned = None
+if len(contours) > 0:
+    cnt = max(contours, key=cv2.contourArea)
+    cnt = cnt.squeeze()
+    if cnt.ndim == 1:
+        cnt = cnt[np.newaxis, :]
+    # Nội suy polygon predict về cùng số điểm với annotation
+    anno_poly = anno_instances[0]["polygon"].flatten().tolist()
+    # Chú ý: contour lấy từ mask 160x160, cần scale lên 640x640 để so với annotation
+    polygon_resampled = resample_polygon(cnt, len(anno_poly)//2)
+    polygon_resampled_scaled = scale_polygon(polygon_resampled, 160, 640)
+    # Đưa về dạng list để align
+    polygon_resampled_scaled_flat = polygon_resampled_scaled.reshape(-1, 2).flatten().tolist()
+    polygon_aligned = procrustes_align_polygon(polygon_resampled_scaled_flat, anno_poly)
+    polygon_aligned = ensure_same_direction(polygon_aligned, anno_poly)
+    polygon_aligned = optimal_reorder_polygon_start(polygon_aligned, anno_poly)
+    print("\nBest predict instance (chuẩn hóa):")
+    print(polygon_aligned)
+    pred_pts = np.array(polygon_aligned).reshape(-1, 2)
+    anno_pts = np.array(anno_poly).reshape(-1, 2)
+    mean_dist = np.mean(np.linalg.norm(pred_pts - anno_pts, axis=1))
+    print(f"Mean distance giữa predict và annotation: {mean_dist:.2f} pixels")
+else:
+    print("\nKhông có contour nào được phát hiện từ mask predict!")
+
+# 7. In annotation để đối chiếu
 for i, ins in enumerate(anno_instances):
     poly_flat = ins["polygon"].flatten().tolist()
-    print(f"Annotation instance {i}:")
+    print(f"\nAnnotation instance {i}:")
     print([ins["class_index"]] + poly_flat)
-    pts = ins["polygon"].astype(np.int32)
-    cv2.polylines(img_show, [pts], isClosed=True, color=(255,0,0), thickness=2)
 
-# 7. So sánh số lượng instance
-num_pred = sum(1 for row in output_data[0] if np.max(row[4:4+class_count]) >= 0.1)
-num_anno = len(anno_instances)
-print(f"\nSố instance predict: {num_pred}")
-print(f"Số instance annotation: {num_anno}")
-
-# 8. Hiển thị ảnh kết quả
-cv2.imshow("Predict (green) & Annotation (blue)", img_show)
+# 8. Vẽ polygon predict (đỏ) và annotation (xanh lá) lên ảnh
+img_vis = img_resized.copy()
+# Vẽ annotation (màu xanh lá)
+for ins in anno_instances:
+    pts = ins["polygon"].astype(np.int32).reshape(-1, 1, 2)
+    cv2.polylines(img_vis, [pts], isClosed=True, color=(0, 255, 0), thickness=2)
+# Vẽ polygon predict (màu đỏ)
+if polygon_aligned is not None:
+    pts_pred = np.array(polygon_aligned, dtype=np.int32).reshape(-1, 1, 2)
+    cv2.polylines(img_vis, [pts_pred], isClosed=True, color=(0, 0, 255), thickness=2)
+# Hiển thị hoặc lưu ảnh
+cv2.imshow("Predict (red) vs Annotation (green)", img_vis)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
