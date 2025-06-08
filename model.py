@@ -5,11 +5,14 @@ import cv2
 class Model(object):
     def __init__(self, model_path):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        # Nếu dùng YOLOv8:
         from ultralytics import YOLO
         self.model = YOLO(model_path)
         self.input_width = 320
         self.input_height = 320
+
+        # In tổng số tham số mô hình
+        total_params = sum(p.numel() for p in self.model.model.parameters())
+        print(f"Total model parameters: {total_params:,}")
 
     def prepare(self):
         return None
@@ -41,16 +44,13 @@ class Model(object):
         return np.array(new_pts, dtype=np.float32).flatten().tolist()
 
     def predict(self, image, labels=None):
-        # image: PIL.Image hoặc np.ndarray (320,320,3)
         if hasattr(image, "convert"):
             image = image.convert("RGB")
         img = np.array(image)
         img_resized = cv2.resize(img, (self.input_width, self.input_height))
-        # YOLOv8 expects BGR
         results = self.model.predict(img_resized, imgsz=320, conf=0.3, device=self.device, verbose=False)
         results = results[0]
         output = []
-        # Lấy mask instance segmentation
         if hasattr(results, "masks") and results.masks is not None:
             for i, mask in enumerate(results.masks.data):
                 mask_np = mask.cpu().numpy().astype(np.uint8)
@@ -63,12 +63,10 @@ class Model(object):
                     cnt = cnt[np.newaxis, :]
                 if len(cnt) < 3:
                     continue
-                num_points = 40  # hoặc số điểm metrics yêu cầu
+                num_points = 40
                 polygon_resampled = self.resample_polygon(cnt, num_points)
-                # Lấy class index và score từ results
                 class_index = int(results.boxes.cls[i].cpu().numpy())
                 score = float(results.boxes.conf[i].cpu().numpy())
-                # Bbox (không dùng, để 0)
                 instance = [class_index, score, 0, 0, 0, 0] + polygon_resampled
                 output.append(instance)
         return output
