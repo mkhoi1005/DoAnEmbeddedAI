@@ -1,50 +1,74 @@
 import numpy as np
-import tflite_runtime.interpreter as tflite
-
-# from nms import non_max_suppression_yolov8
+import torch
+import cv2
 
 class Model(object):
     def __init__(self, model_path):
-        #super.__init__()
-        self.interpreter = tflite.Interpreter(model_path=model_path)
-        self.interpreter.allocate_tensors()
-
-        self.BOX_COORD_NUM = 4
-
-        self.input_details = self.interpreter.get_input_details()
-        self.output_details = self.interpreter.get_output_details()
-        print(self.input_details)
-
-        # check the type of the input tensor
-        self.floating_model = self.input_details[0]["dtype"] == np.float32
-
-        # NxHxWxC, H:1, W:2
-        self.input_height = self.input_details[0]["shape"][1]
-        self.input_width = self.input_details[0]["shape"][2]
-
-        self.max_box_count = self.output_details[0]["shape"][2]
-
-        self.class_count = self.output_details[0]["shape"][1] - self.BOX_COORD_NUM
-        self.input_mean = 0.0
-        self.input_std = 255.0
-        self.keypoint_count = 0
-        self.score_threshold = 0.6
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # Nếu dùng YOLOv8:
+        from ultralytics import YOLO
+        self.model = YOLO(model_path)
+        self.input_width = 320
+        self.input_height = 320
 
     def prepare(self):
         return None
 
-    def predict(self, image):
-        input_data = np.expand_dims(image, axis=0)
+    def resample_polygon(self, poly, num_points):
+        pts = np.array(poly, dtype=np.float32).reshape(-1, 2)
+        if len(pts) == num_points:
+            return pts.flatten().tolist()
+        if len(pts) < 2 or num_points < 2:
+            return []
+        dists = np.sqrt(np.sum(np.diff(np.vstack([pts, pts[0]]), axis=0)**2, axis=1))
+        total = np.sum(dists)
+        if total == 0 or num_points == 0:
+            return []
+        step = total / num_points
+        new_pts = [pts[0]]
+        acc = 0
+        i = 0
+        for _ in range(1, num_points):
+            acc += step
+            while acc > dists[i]:
+                acc -= dists[i]
+                i += 1
+                if i >= len(pts):
+                    i = 0
+            ratio = acc / dists[i] if dists[i] > 0 else 0
+            new_pt = pts[i] + ratio * (pts[(i+1)%len(pts)] - pts[i])
+            new_pts.append(new_pt)
+        return np.array(new_pts, dtype=np.float32).flatten().tolist()
 
-        if self.floating_model:
-            input_data = (np.float32(input_data) - self.input_mean) / self.input_std
-
-        self.interpreter.set_tensor(self.input_details[0]["index"], input_data)
-
-        self.interpreter.invoke()
-
-        output_data = self.interpreter.get_tensor(self.output_details[0]["index"])
-        results = np.squeeze(output_data).transpose()
-
-        return results
-
+    def predict(self, image, labels=None):
+        # image: PIL.Image hoặc np.ndarray (320,320,3)
+        if hasattr(image, "convert"):
+            image = image.convert("RGB")
+        img = np.array(image)
+        img_resized = cv2.resize(img, (self.input_width, self.input_height))
+        # YOLOv8 expects BGR
+        results = self.model.predict(img_resized, imgsz=320, conf=0.3, device=self.device, verbose=False)
+        results = results[0]
+        output = []
+        # Lấy mask instance segmentation
+        if hasattr(results, "masks") and results.masks is not None:
+            for i, mask in enumerate(results.masks.data):
+                mask_np = mask.cpu().numpy().astype(np.uint8)
+                contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if len(contours) == 0:
+                    continue
+                cnt = max(contours, key=cv2.contourArea)
+                cnt = cnt.squeeze()
+                if cnt.ndim == 1:
+                    cnt = cnt[np.newaxis, :]
+                if len(cnt) < 3:
+                    continue
+                num_points = 40  # hoặc số điểm metrics yêu cầu
+                polygon_resampled = self.resample_polygon(cnt, num_points)
+                # Lấy class index và score từ results
+                class_index = int(results.boxes.cls[i].cpu().numpy())
+                score = float(results.boxes.conf[i].cpu().numpy())
+                # Bbox (không dùng, để 0)
+                instance = [class_index, score, 0, 0, 0, 0] + polygon_resampled
+                output.append(instance)
+        return output

@@ -9,9 +9,9 @@ if not hasattr(np, 'bool'):
     
 if __name__ == "__main__":
     #ONLY CHANGE 5 LINES
-    data_path = './BTXRD/images' #path to dataset
+    data_path = './BTXRD' #path to dataset
     nc = 9 #number of class
-    path_to_model = "./best_float32.tflite" #path to model
+    path_to_model = "./best.pt" #path to model
     model = Model(model_path=path_to_model)
     dataset_name = "btxrd" #must be one of these names:  "btxrd", "rip current", "trashcan"
     #
